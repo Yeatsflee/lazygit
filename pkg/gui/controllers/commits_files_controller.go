@@ -87,54 +87,71 @@ func (self *CommitFilesController) GetKeybindings(opts types.KeybindingsOpts) []
 			GetDisabledReason: self.require(self.singleItemSelected()),
 			Description:       self.c.Tr.OpenDiffTool,
 		},
-		{
-			Keys:              opts.GetKeys(opts.Config.Universal.Select),
-			Handler:           self.withItems(self.toggleForPatch),
-			GetDisabledReason: self.require(self.itemsSelected()),
-			Description:       self.c.Tr.ToggleAddToPatch,
-			Tooltip: utils.ResolvePlaceholderString(self.c.Tr.ToggleAddToPatchTooltip,
-				map[string]string{"doc": constants.Links.Docs.CustomPatchDemo},
-			),
-			DisplayOnScreen: true,
-		},
-		{
-			Keys:        opts.GetKeys(opts.Config.Files.ToggleStagedAll),
-			Handler:     self.withItem(self.toggleAllForPatch),
-			Description: self.c.Tr.ToggleAllInPatch,
-			Tooltip: utils.ResolvePlaceholderString(self.c.Tr.ToggleAllInPatchTooltip,
-				map[string]string{"doc": constants.Links.Docs.CustomPatchDemo},
-			),
-		},
-		{
+	}
+
+	// The custom patch feature is reached exclusively from this view, so when
+	// it's disabled we simply don't register the keybindings that would start
+	// building a patch.
+	if !self.customPatchDisabled() {
+		bindings = append(bindings,
+			&types.Binding{
+				Keys:              opts.GetKeys(opts.Config.Universal.Select),
+				Handler:           self.withItems(self.toggleForPatch),
+				GetDisabledReason: self.require(self.itemsSelected()),
+				Description:       self.c.Tr.ToggleAddToPatch,
+				Tooltip: utils.ResolvePlaceholderString(self.c.Tr.ToggleAddToPatchTooltip,
+					map[string]string{"doc": constants.Links.Docs.CustomPatchDemo},
+				),
+				DisplayOnScreen: true,
+			},
+			&types.Binding{
+				Keys:        opts.GetKeys(opts.Config.Files.ToggleStagedAll),
+				Handler:     self.withItem(self.toggleAllForPatch),
+				Description: self.c.Tr.ToggleAllInPatch,
+				Tooltip: utils.ResolvePlaceholderString(self.c.Tr.ToggleAllInPatchTooltip,
+					map[string]string{"doc": constants.Links.Docs.CustomPatchDemo},
+				),
+			},
+		)
+	}
+
+	bindings = append(bindings,
+		&types.Binding{
 			Keys:              opts.GetKeys(opts.Config.Universal.GoInto),
 			Handler:           self.withItem(self.enter),
 			GetDisabledReason: self.require(self.singleItemSelected()),
 			Description:       self.c.Tr.EnterCommitFile,
 			Tooltip:           self.c.Tr.EnterCommitFileTooltip,
 		},
-		{
+		&types.Binding{
 			Keys:        opts.GetKeys(opts.Config.Files.ToggleTreeView),
 			Handler:     self.toggleTreeView,
 			Description: self.c.Tr.ToggleTreeView,
 			Tooltip:     self.c.Tr.ToggleTreeViewTooltip,
 		},
-		{
+		&types.Binding{
 			Keys:              opts.GetKeys(opts.Config.Files.CollapseAll),
 			Handler:           self.collapseAll,
 			Description:       self.c.Tr.CollapseAll,
 			Tooltip:           self.c.Tr.CollapseAllTooltip,
 			GetDisabledReason: self.require(self.isInTreeMode),
 		},
-		{
+		&types.Binding{
 			Keys:              opts.GetKeys(opts.Config.Files.ExpandAll),
 			Handler:           self.expandAll,
 			Description:       self.c.Tr.ExpandAll,
 			Tooltip:           self.c.Tr.ExpandAllTooltip,
 			GetDisabledReason: self.require(self.isInTreeMode),
 		},
-	}
+	)
 
 	return bindings
+}
+
+// customPatchDisabled reports whether the custom patch feature has been turned
+// off via config. When disabled, no UI path may start a patch.
+func (self *CommitFilesController) customPatchDisabled() bool {
+	return self.c.UserConfig().Gui.DisableCustomPatch
 }
 
 func (self *CommitFilesController) context() *context.CommitFilesContext {
@@ -434,6 +451,10 @@ func (self *CommitFilesController) openDiffTool(node *filetree.CommitFileNode) e
 }
 
 func (self *CommitFilesController) toggleForPatch(selectedNodes []*filetree.CommitFileNode) error {
+	if self.customPatchDisabled() {
+		return nil
+	}
+
 	if self.c.UserConfig().Git.DiffContextSize == 0 {
 		return fmt.Errorf(self.c.Tr.Actions.NotEnoughContextForCustomPatch,
 			self.c.UserConfig().Keybinding.Universal.IncreaseContextInDiffView)
@@ -530,6 +551,16 @@ func (self *CommitFilesController) enter(node *filetree.CommitFileNode) error {
 func (self *CommitFilesController) enterCommitFile(node *filetree.CommitFileNode, opts types.OnFocusOpts) error {
 	if node.File == nil {
 		return self.handleToggleCommitFileDirCollapsed(node)
+	}
+
+	// When the custom patch feature is disabled, entering a file just focuses
+	// the main view showing its diff, exactly like the "focus main view"
+	// keybinding does, instead of starting a patch.
+	if self.customPatchDisabled() {
+		mainContext := self.c.Contexts().Normal
+		mainContext.ClearSearchString()
+		self.c.Context().Push(mainContext, types.OnFocusOpts{})
+		return nil
 	}
 
 	if self.c.UserConfig().Git.DiffContextSize == 0 {

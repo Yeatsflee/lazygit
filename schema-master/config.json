@@ -842,6 +842,11 @@
           "type": "boolean",
           "description": "If true, when using the panel jump keys (default 1 through 5) and target panel is already active, go to next tab instead",
           "default": false
+        },
+        "disableCustomPatch": {
+          "type": "boolean",
+          "description": "If true, disable the custom patch feature entirely. The keybindings for\nbuilding a custom patch from a commit's files (select/toggle-all) are not\nregistered, and clicking a line in the focused diff won't start one either.",
+          "default": false
         }
       },
       "additionalProperties": false,

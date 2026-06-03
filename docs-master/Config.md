@@ -338,6 +338,11 @@ gui:
   # is already active, go to next tab instead
   switchTabsWithPanelJumpKeys: false
 
+  # If true, disable the custom patch feature entirely. The keybindings for
+  # building a custom patch from a commit's files (select/toggle-all) are not
+  # registered, and clicking a line in the focused diff won't start one either.
+  disableCustomPatch: false
+
 # Config relating to git
 git:
   # Array of pagers. Each entry has the following format:
