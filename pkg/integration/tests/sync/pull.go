@@ -9,7 +9,9 @@ var Pull = NewIntegrationTest(NewIntegrationTestArgs{
 	Description:  "Pull a commit from the remote",
 	ExtraCmdArgs: []string{},
 	Skip:         false,
-	SetupConfig:  func(config *config.AppConfig) {},
+	SetupConfig: func(appConfig *config.AppConfig) {
+		appConfig.GetUserConfig().Keybinding.Universal.Pull = config.Keybinding{"<f12>"}
+	},
 	SetupRepo: func(shell *Shell) {
 		shell.EmptyCommit("one")
 		shell.EmptyCommit("two")

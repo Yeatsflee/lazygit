@@ -428,6 +428,19 @@ func (gui *Gui) resetHelpersAndControllers() {
 	for _, context := range gui.c.Context().AllList() {
 		controllers.AttachControllers(context, listControllerFactory.Create(context))
 	}
+
+	for _, context := range []types.Context{
+		gui.State.Contexts.Files,
+		gui.State.Contexts.LocalCommits,
+		gui.State.Contexts.CommitFiles,
+		gui.State.Contexts.Normal,
+		gui.State.Contexts.NormalSecondary,
+		gui.State.Contexts.Staging,
+		gui.State.Contexts.StagingSecondary,
+		gui.State.Contexts.CustomPatchBuilder,
+	} {
+		controllers.AttachControllers(context, controllers.NewParentDirectoryController(common, context))
+	}
 }
 
 func (gui *Gui) getCommitMessageSetTextareaTextFn(getView func() *gocui.View) func(string) {

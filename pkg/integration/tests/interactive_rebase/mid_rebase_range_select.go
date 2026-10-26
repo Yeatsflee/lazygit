@@ -9,7 +9,9 @@ var MidRebaseRangeSelect = NewIntegrationTest(NewIntegrationTestArgs{
 	Description:  "Do various things with range selection in the commits view when mid-rebase",
 	ExtraCmdArgs: []string{},
 	Skip:         false,
-	SetupConfig:  func(config *config.AppConfig) {},
+	SetupConfig: func(appConfig *config.AppConfig) {
+		appConfig.GetUserConfig().Keybinding.Commits.PickCommit = config.Keybinding{"<f12>"}
+	},
 	SetupRepo: func(shell *Shell) {
 		shell.
 			CreateNCommits(10)

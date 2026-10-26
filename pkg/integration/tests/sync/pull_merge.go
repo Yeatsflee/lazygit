@@ -9,7 +9,9 @@ var PullMerge = NewIntegrationTest(NewIntegrationTestArgs{
 	Description:  "Pull with a merge strategy",
 	ExtraCmdArgs: []string{},
 	Skip:         false,
-	SetupConfig:  func(config *config.AppConfig) {},
+	SetupConfig: func(appConfig *config.AppConfig) {
+		appConfig.GetUserConfig().Keybinding.Universal.Pull = config.Keybinding{"<f12>"}
+	},
 	SetupRepo: func(shell *Shell) {
 		shell.CreateFileAndAdd("file", "content1")
 		shell.Commit("one")
