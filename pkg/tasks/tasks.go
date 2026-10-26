@@ -370,8 +370,19 @@ type TaskOpts struct {
 	InitialContentLoaded func()
 }
 
-func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string) error {
+// onInitialContent callbacks run once, before the task is marked idle, when the
+// current task first has content available. A task that is stopped or superseded
+// before that point does not run them. Callbacks may schedule more work, but must
+// not synchronously call NewTask or Close on this manager.
+func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string, onInitialContent ...func()) error {
 	gocuiTask := self.newGocuiTask()
+
+	// Assign IDs before starting the goroutines so that the order of requests,
+	// rather than the order in which workers happen to run, determines the winner.
+	self.taskIDMutex.Lock()
+	self.newTaskID++
+	taskID := self.newTaskID
+	self.taskIDMutex.Unlock()
 
 	var completeTaskOnce sync.Once
 
@@ -385,8 +396,10 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string) error
 		defer completeGocuiTask()
 
 		self.taskIDMutex.Lock()
-		self.newTaskID++
-		taskID := self.newTaskID
+		if taskID != self.newTaskID {
+			self.taskIDMutex.Unlock()
+			return
+		}
 
 		if self.GetTaskKey() != key && self.onNewKey != nil {
 			self.onNewKey()
@@ -416,7 +429,9 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string) error
 
 		var once sync.Once
 		onStop := func() {
+			self.taskIDMutex.Lock()
 			close(stop)
+			self.taskIDMutex.Unlock()
 			<-notifyStopped
 		}
 
@@ -424,8 +439,31 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string) error
 
 		self.waitingMutex.Unlock()
 
-		if err := f(TaskOpts{Stop: stop, InitialContentLoaded: completeGocuiTask}); err != nil {
+		var initialContentOnce sync.Once
+		initialContentLoaded := func() {
+			initialContentOnce.Do(func() {
+				self.taskIDMutex.Lock()
+				if taskID == self.newTaskID {
+					select {
+					case <-stop:
+					default:
+						for _, callback := range onInitialContent {
+							if callback != nil {
+								callback()
+							}
+						}
+					}
+				}
+				self.taskIDMutex.Unlock()
+				completeGocuiTask()
+			})
+		}
+
+		if err := f(TaskOpts{Stop: stop, InitialContentLoaded: initialContentLoaded}); err != nil {
 			self.Log.Error(err) // might need an onError callback
+		} else {
+			// String tasks finish without explicitly reporting initial content.
+			initialContentLoaded()
 		}
 
 		close(notifyStopped)

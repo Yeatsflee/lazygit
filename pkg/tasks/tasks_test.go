@@ -2,21 +2,166 @@ package tasks
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/jesseduffield/lazygit/pkg/utils"
+	"github.com/stretchr/testify/assert"
 )
 
 func getCounter() (func(), func() int) {
 	counter := 0
 	return func() { counter++ }, func() int { return counter }
+}
+
+type observedTask struct {
+	*gocui.FakeTask
+	done chan struct{}
+}
+
+func (task *observedTask) Done() {
+	task.FakeTask.Done()
+	close(task.done)
+}
+
+func newObservedManager() (*ViewBufferManager, <-chan *observedTask) {
+	tasks := make(chan *observedTask, 4)
+	return NewViewBufferManager(
+		utils.NewDummyLog(), io.Discard,
+		func() {}, func() {}, func() {}, func() {},
+		func() gocui.Task {
+			task := &observedTask{FakeTask: gocui.NewFakeTask(), done: make(chan struct{})}
+			tasks <- task
+			return task
+		},
+	), tasks
+}
+
+func awaitTaskSignal(t *testing.T, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		assert.FailNow(t, "timed out waiting for task")
+	}
+}
+
+func TestInitialContentCallback(t *testing.T) {
+	for _, explicitReady := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit ready %v", explicitReady), func(t *testing.T) {
+			manager, tasks := newObservedManager()
+			proceed := make(chan struct{})
+			var task *observedTask
+			callbackCount := 0
+			content := ""
+			assert.NoError(t, manager.NewTask(func(opts TaskOpts) error {
+				<-proceed
+				content = "ready"
+				if explicitReady {
+					opts.InitialContentLoaded()
+					opts.InitialContentLoaded()
+				}
+				return nil
+			}, "content", func() {
+				callbackCount++
+				assert.Equal(t, "ready", content)
+				assert.Equal(t, gocui.TaskStatusBusy, task.Status())
+			}))
+			task = <-tasks
+			close(proceed)
+			awaitTaskSignal(t, task.done)
+			manager.Close()
+			assert.Equal(t, 1, callbackCount)
+			assert.Equal(t, gocui.TaskStatusDone, task.Status())
+		})
+	}
+}
+
+func TestSupersededTaskDoesNotReportInitialContent(t *testing.T) {
+	manager, tasks := newObservedManager()
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	var callbacks atomic.Int32
+
+	assert.NoError(t, manager.NewTask(func(opts TaskOpts) error {
+		close(started)
+		<-finish
+		// The replacement has been requested but has not stopped this task yet.
+		opts.InitialContentLoaded()
+		return nil
+	}, "old", func() { callbacks.Add(1) }))
+	oldTask := <-tasks
+	awaitTaskSignal(t, started)
+
+	manager.waitingMutex.Lock()
+	assert.NoError(t, manager.NewTask(func(TaskOpts) error { return nil }, "new", func() {
+		callbacks.Add(10)
+	}))
+	newTask := <-tasks
+	close(finish)
+	awaitTaskSignal(t, oldTask.done)
+	manager.waitingMutex.Unlock()
+	awaitTaskSignal(t, newTask.done)
+	manager.Close()
+	assert.Equal(t, int32(10), callbacks.Load())
+}
+
+func TestQueuedTasksRespectRequestOrder(t *testing.T) {
+	manager, tasks := newObservedManager()
+	var callbacks atomic.Int32
+	manager.waitingMutex.Lock()
+	assert.NoError(t, manager.NewTask(func(TaskOpts) error {
+		assert.Fail(t, "superseded task must not start")
+		return nil
+	}, "old", func() { callbacks.Add(1) }))
+	oldTask := <-tasks
+	assert.NoError(t, manager.NewTask(func(TaskOpts) error { return nil }, "new", func() {
+		callbacks.Add(10)
+	}))
+	newTask := <-tasks
+	manager.waitingMutex.Unlock()
+	awaitTaskSignal(t, oldTask.done)
+	awaitTaskSignal(t, newTask.done)
+	manager.Close()
+	assert.Equal(t, int32(10), callbacks.Load())
+}
+
+func TestClosedTaskDoesNotReportInitialContent(t *testing.T) {
+	manager, tasks := newObservedManager()
+	started := make(chan struct{})
+	var callbacks atomic.Int32
+	assert.NoError(t, manager.NewTask(func(opts TaskOpts) error {
+		close(started)
+		<-opts.Stop
+		opts.InitialContentLoaded()
+		return nil
+	}, "content", func() { callbacks.Add(1) }))
+	task := <-tasks
+	awaitTaskSignal(t, started)
+	manager.Close()
+	awaitTaskSignal(t, task.done)
+	assert.Zero(t, callbacks.Load())
+}
+
+func TestFailedTaskDoesNotReportInitialContent(t *testing.T) {
+	manager, tasks := newObservedManager()
+	var callbacks atomic.Int32
+	assert.NoError(t, manager.NewTask(func(TaskOpts) error {
+		return errors.New("failed to load content")
+	}, "content", func() { callbacks.Add(1) }))
+	task := <-tasks
+	awaitTaskSignal(t, task.done)
+	manager.Close()
+	assert.Zero(t, callbacks.Load())
 }
 
 func TestNewCmdTaskInstantStop(t *testing.T) {
