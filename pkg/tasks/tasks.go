@@ -39,9 +39,10 @@ type ViewBufferManager struct {
 	taskIDMutex  deadlock.Mutex
 	Log          *logrus.Entry
 	newTaskID    int
-	readLines    chan LinesToRead
 	taskKey      string
 	onNewKey     func()
+	readerMutex  sync.Mutex
+	reader       *taskReader
 
 	// beforeStart is the function that is called before starting a new task
 	beforeStart  func()
@@ -59,6 +60,35 @@ type ViewBufferManager struct {
 	// it can slow things down quite a bit. In these situations we
 	// want to throttle the spawning of processes.
 	throttle bool
+}
+
+// Each registered render owns its read queue, including while its worker is
+// waiting to start. Readers must never accidentally send requests to the task
+// that happened to precede or replace it.
+type taskReader struct {
+	requests   chan LinesToRead
+	done       chan struct{}
+	canceled   chan struct{}
+	cancelOnce sync.Once
+}
+
+func (reader *taskReader) cancel() {
+	reader.cancelOnce.Do(func() { close(reader.canceled) })
+}
+
+func (reader *taskReader) isCanceled() bool {
+	select {
+	case <-reader.canceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (self *ViewBufferManager) currentReader() *taskReader {
+	self.readerMutex.Lock()
+	defer self.readerMutex.Unlock()
+	return self.reader
 }
 
 type LinesToRead struct {
@@ -93,28 +123,68 @@ func NewViewBufferManager(
 		beforeStart:  beforeStart,
 		refreshView:  refreshView,
 		onEndOfInput: onEndOfInput,
-		readLines:    nil,
 		onNewKey:     onNewKey,
 		newGocuiTask: newGocuiTask,
 	}
 }
 
 func (self *ViewBufferManager) ReadLines(n int) {
-	if self.readLines != nil {
-		go utils.Safe(func() {
-			self.readLines <- LinesToRead{Total: n, InitialRefreshAfter: -1}
-		})
+	reader := self.currentReader()
+	if reader == nil {
+		return
 	}
+	go utils.Safe(func() {
+		select {
+		case <-reader.canceled:
+		case <-reader.done:
+		case reader.requests <- LinesToRead{Total: n, InitialRefreshAfter: -1}:
+		}
+	})
 }
 
 func (self *ViewBufferManager) ReadToEnd(then func()) {
-	if self.readLines != nil {
-		go utils.Safe(func() {
-			self.readLines <- LinesToRead{Total: -1, InitialRefreshAfter: -1, Then: then}
-		})
-	} else if then != nil {
-		then()
+	// Register the work before returning to the key handler, so the UI cannot
+	// become idle before the read finishes and its follow-up has been scheduled.
+	task := self.newGocuiTask()
+	reader := self.currentReader()
+	if reader == nil {
+		if then != nil {
+			then()
+		}
+		task.Done()
+		return
 	}
+
+	finished := make(chan struct{})
+	var once sync.Once
+	complete := func() {
+		once.Do(func() {
+			defer close(finished)
+			defer task.Done()
+			select {
+			case <-reader.canceled:
+				return
+			default:
+				if then != nil {
+					then()
+				}
+			}
+		})
+	}
+	go utils.Safe(func() {
+		select {
+		case <-reader.canceled:
+		case <-reader.done:
+		case reader.requests <- LinesToRead{Total: -1, InitialRefreshAfter: -1, Then: complete}:
+			select {
+			case <-finished:
+				return
+			case <-reader.canceled:
+			case <-reader.done:
+			}
+		}
+		complete()
+	})
 }
 
 func (self *ViewBufferManager) NewCmdTask(start func() (*exec.Cmd, io.Reader), prefix string, linesToRead LinesToRead, onDoneFn func()) func(TaskOpts) error {
@@ -184,7 +254,10 @@ func (self *ViewBufferManager) NewCmdTask(start func() (*exec.Cmd, io.Reader), p
 
 		loadingMutex := deadlock.Mutex{}
 
-		self.readLines = make(chan LinesToRead, 1024)
+		readLines := opts.readLines
+		if readLines == nil {
+			readLines = make(chan LinesToRead, 1024)
+		}
 
 		scanner := bufio.NewScanner(r)
 		scanner.Split(utils.ScanLinesAndTruncateWhenLongerThanBuffer(bufio.MaxScanTokenSize))
@@ -248,12 +321,17 @@ func (self *ViewBufferManager) NewCmdTask(start func() (*exec.Cmd, io.Reader), p
 				}
 			}
 
+			// Always load the initial viewport before queued requests, even if a
+			// key was pressed while the task's worker was still waiting to start.
+			requests := make(chan LinesToRead, 1)
+			requests <- linesToRead
 		outer:
 			for {
 				select {
 				case <-opts.Stop:
 					break outer
-				case linesToRead := <-self.readLines:
+				case linesToRead := <-requests:
+					requests = readLines
 					callThen := func() {
 						if linesToRead.Then != nil {
 							linesToRead.Then()
@@ -303,8 +381,6 @@ func (self *ViewBufferManager) NewCmdTask(start func() (*exec.Cmd, io.Reader), p
 				}
 			}
 
-			self.readLines = nil
-
 			refreshViewIfStale()
 
 			select {
@@ -327,8 +403,6 @@ func (self *ViewBufferManager) NewCmdTask(start func() (*exec.Cmd, io.Reader), p
 			close(lineWrittenChan)
 		})
 
-		self.readLines <- linesToRead
-
 		<-done
 
 		return nil
@@ -337,6 +411,9 @@ func (self *ViewBufferManager) NewCmdTask(start func() (*exec.Cmd, io.Reader), p
 
 // Close closes the task manager, killing whatever task may currently be running
 func (self *ViewBufferManager) Close() {
+	if reader := self.currentReader(); reader != nil {
+		reader.cancel()
+	}
 	if self.stopCurrentTask == nil {
 		return
 	}
@@ -361,6 +438,7 @@ func (self *ViewBufferManager) Close() {
 // 2) string based, where the manager can also be asked to read more lines
 
 type TaskOpts struct {
+	readLines chan LinesToRead
 	// Channel that tells the task to stop, because another task wants to run.
 	Stop chan struct{}
 
@@ -382,6 +460,17 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string, onIni
 	self.taskIDMutex.Lock()
 	self.newTaskID++
 	taskID := self.newTaskID
+	reader := &taskReader{
+		requests: make(chan LinesToRead, 1024),
+		done:     make(chan struct{}),
+		canceled: make(chan struct{}),
+	}
+	self.readerMutex.Lock()
+	if self.reader != nil {
+		self.reader.cancel()
+	}
+	self.reader = reader
+	self.readerMutex.Unlock()
 	self.taskIDMutex.Unlock()
 
 	var completeTaskOnce sync.Once
@@ -393,10 +482,11 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string, onIni
 	}
 
 	go utils.Safe(func() {
+		defer close(reader.done)
 		defer completeGocuiTask()
 
 		self.taskIDMutex.Lock()
-		if taskID != self.newTaskID {
+		if taskID != self.newTaskID || reader.isCanceled() {
 			self.taskIDMutex.Unlock()
 			return
 		}
@@ -411,7 +501,7 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string, onIni
 		self.waitingMutex.Lock()
 
 		self.taskIDMutex.Lock()
-		if taskID < self.newTaskID {
+		if taskID < self.newTaskID || reader.isCanceled() {
 			self.waitingMutex.Unlock()
 			self.taskIDMutex.Unlock()
 			return
@@ -422,14 +512,13 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string, onIni
 			self.stopCurrentTask()
 		}
 
-		self.readLines = nil
-
 		stop := make(chan struct{})
 		notifyStopped := make(chan struct{})
 
 		var once sync.Once
 		onStop := func() {
 			self.taskIDMutex.Lock()
+			reader.cancel()
 			close(stop)
 			self.taskIDMutex.Unlock()
 			<-notifyStopped
@@ -446,6 +535,7 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string, onIni
 				if taskID == self.newTaskID {
 					select {
 					case <-stop:
+					case <-reader.canceled:
 					default:
 						for _, callback := range onInitialContent {
 							if callback != nil {
@@ -459,7 +549,8 @@ func (self *ViewBufferManager) NewTask(f func(TaskOpts) error, key string, onIni
 			})
 		}
 
-		if err := f(TaskOpts{Stop: stop, InitialContentLoaded: initialContentLoaded}); err != nil {
+		if err := f(TaskOpts{Stop: stop, InitialContentLoaded: initialContentLoaded, readLines: reader.requests}); err != nil {
+			reader.cancel()
 			self.Log.Error(err) // might need an onError callback
 		} else {
 			// String tasks finish without explicitly reporting initial content.

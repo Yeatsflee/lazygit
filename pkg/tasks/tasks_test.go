@@ -115,6 +115,19 @@ func TestSupersededTaskDoesNotReportInitialContent(t *testing.T) {
 	assert.Equal(t, int32(10), callbacks.Load())
 }
 
+func TestInitialContentCallbackForRepeatedTaskKey(t *testing.T) {
+	manager, tasks := newObservedManager()
+	var callbacks atomic.Int32
+	for range 2 {
+		assert.NoError(t, manager.NewTask(func(TaskOpts) error { return nil }, "same content", func() {
+			callbacks.Add(1)
+		}))
+		awaitTaskSignal(t, (<-tasks).done)
+	}
+	manager.Close()
+	assert.Equal(t, int32(2), callbacks.Load())
+}
+
 func TestQueuedTasksRespectRequestOrder(t *testing.T) {
 	manager, tasks := newObservedManager()
 	var callbacks atomic.Int32
@@ -161,6 +174,125 @@ func TestFailedTaskDoesNotReportInitialContent(t *testing.T) {
 	task := <-tasks
 	awaitTaskSignal(t, task.done)
 	manager.Close()
+	assert.Zero(t, callbacks.Load())
+}
+
+func TestReadToEndTracksTaskBeforeItsWorkerStarts(t *testing.T) {
+	manager, tasks := newObservedManager()
+	writer := &bytes.Buffer{}
+	manager.writer = writer
+	manager.waitingMutex.Lock()
+	commandTask := manager.NewCmdTask(func() (*exec.Cmd, io.Reader) {
+		return exec.Command("unused"), strings.NewReader("one\ntwo\nthree\nfour\n")
+	}, "", LinesToRead{Total: 2, InitialRefreshAfter: -1}, nil)
+	assert.NoError(t, manager.NewTask(commandTask, "diff", func() {
+		// The initial viewport must precede even a read queued before startup.
+		assert.Equal(t, "one\ntwo\n", writer.String())
+	}))
+	renderTask := <-tasks
+	var readTask *observedTask
+	callbackCount := 0
+	manager.ReadToEnd(func() {
+		callbackCount++
+		assert.Equal(t, "one\ntwo\nthree\nfour\n", writer.String())
+		assert.Equal(t, gocui.TaskStatusBusy, readTask.Status())
+	})
+	readTask = <-tasks
+	assert.Equal(t, gocui.TaskStatusBusy, readTask.Status())
+	manager.waitingMutex.Unlock()
+	awaitTaskSignal(t, readTask.done)
+	awaitTaskSignal(t, renderTask.done)
+	manager.Close()
+	assert.Equal(t, 1, callbackCount)
+}
+
+func TestReadToEndCompletesForFinishedAndStringTasks(t *testing.T) {
+	for _, alreadyFinished := range []bool{false, true} {
+		t.Run(fmt.Sprintf("already finished %v", alreadyFinished), func(t *testing.T) {
+			manager, tasks := newObservedManager()
+			finish := make(chan struct{})
+			assert.NoError(t, manager.NewTask(func(TaskOpts) error {
+				<-finish
+				return nil
+			}, "string"))
+			renderTask := <-tasks
+			if alreadyFinished {
+				close(finish)
+				awaitTaskSignal(t, renderTask.done)
+			}
+			var callbackCount atomic.Int32
+			manager.ReadToEnd(func() { callbackCount.Add(1) })
+			readTask := <-tasks
+			if !alreadyFinished {
+				close(finish)
+			}
+			awaitTaskSignal(t, readTask.done)
+			manager.Close()
+			assert.Equal(t, int32(1), callbackCount.Load())
+		})
+	}
+}
+
+func TestReadToEndReleasesBusyWhenQueuedRequestIsCanceled(t *testing.T) {
+	for _, reason := range []string{"superseded", "closed", "failed"} {
+		t.Run(reason, func(t *testing.T) {
+			manager, tasks := newObservedManager()
+			started := make(chan struct{})
+			finish := make(chan struct{})
+			assert.NoError(t, manager.NewTask(func(opts TaskOpts) error {
+				close(started)
+				if reason == "failed" {
+					<-finish
+					return errors.New("content failed to load")
+				}
+				<-opts.Stop
+				return nil
+			}, "old"))
+			renderTask := <-tasks
+			awaitTaskSignal(t, started)
+			var callbackCount atomic.Int32
+			manager.ReadToEnd(func() { callbackCount.Add(1) })
+			readTask := <-tasks
+			switch reason {
+			case "superseded":
+				assert.NoError(t, manager.NewTask(func(TaskOpts) error { return nil }, "new"))
+				awaitTaskSignal(t, (<-tasks).done)
+			case "closed":
+				manager.Close()
+			case "failed":
+				close(finish)
+			}
+			awaitTaskSignal(t, readTask.done)
+			awaitTaskSignal(t, renderTask.done)
+			manager.Close()
+			assert.Zero(t, callbackCount.Load())
+		})
+	}
+}
+
+func TestReadToEndWithoutRenderStillCompletesBeforeIdle(t *testing.T) {
+	manager, tasks := newObservedManager()
+	callbackCount := 0
+	manager.ReadToEnd(func() { callbackCount++ })
+	awaitTaskSignal(t, (<-tasks).done)
+	assert.Equal(t, 1, callbackCount)
+}
+
+func TestReadToEndReleasesBusyWhenWorkerIsCanceledBeforeStarting(t *testing.T) {
+	manager, tasks := newObservedManager()
+	manager.waitingMutex.Lock()
+	assert.NoError(t, manager.NewTask(func(TaskOpts) error {
+		assert.Fail(t, "canceled worker must not start")
+		return nil
+	}, "diff"))
+	renderTask := <-tasks
+	var callbacks atomic.Int32
+	manager.ReadToEnd(func() { callbacks.Add(1) })
+	readTask := <-tasks
+	manager.Close()
+	awaitTaskSignal(t, readTask.done)
+	manager.waitingMutex.Unlock()
+	awaitTaskSignal(t, renderTask.done)
 	assert.Zero(t, callbacks.Load())
 }
 
