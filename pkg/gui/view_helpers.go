@@ -34,6 +34,12 @@ func (gui *Gui) linesToReadFromCmdTask(v *gocui.View) tasks.LinesToRead {
 		// performance problems for huge monitors or tiny font sizes
 		height*(height-1)/minScrollbarHeight+oy, 5000)
 
+	if request := gui.State.pendingNavigationRestore; request != nil && request.view == v {
+		// The completion callback can restore the viewport only after enough
+		// content has been loaded to include the saved position.
+		linesToReadForAccurateScrollbar = max(linesToReadForAccurateScrollbar, request.position.originY+height+10)
+	}
+
 	return tasks.LinesToRead{
 		Total:               linesToReadForAccurateScrollbar,
 		InitialRefreshAfter: linesForFirstRefresh,

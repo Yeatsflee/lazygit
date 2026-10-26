@@ -324,7 +324,7 @@ func (gui *Gui) GetInitialKeybindings() ([]*types.Binding, []*gocui.ViewMouseBin
 		},
 	}...)
 
-	return bindings, mouseKeybindings
+	return append(bindings, gui.vimJumpKeybindings()...), mouseKeybindings
 }
 
 func (gui *Gui) GetInitialKeybindingsWithCustomCommands() ([]*types.Binding, []*gocui.ViewMouseBinding) {

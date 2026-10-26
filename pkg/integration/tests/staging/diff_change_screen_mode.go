@@ -9,7 +9,9 @@ var DiffChangeScreenMode = NewIntegrationTest(NewIntegrationTestArgs{
 	Description:  "Change the staged changes screen mode",
 	ExtraCmdArgs: []string{},
 	Skip:         false,
-	SetupConfig:  func(config *config.AppConfig) {},
+	SetupConfig: func(config *config.AppConfig) {
+		config.GetUserConfig().Keybinding.Universal.TogglePanel = []string{"<f12>"}
+	},
 	SetupRepo: func(shell *Shell) {
 		shell.CreateFile("file", "first line\nsecond line")
 	},
@@ -23,7 +25,7 @@ var DiffChangeScreenMode = NewIntegrationTest(NewIntegrationTestArgs{
 			PressPrimaryAction().
 			Title(Equals("Unstaged changes")).
 			Content(Contains("+second line").DoesNotContain("+first line")).
-			PressTab()
+			Press(keys.Universal.TogglePanel)
 
 		t.Views().StagingSecondary().
 			IsFocused().

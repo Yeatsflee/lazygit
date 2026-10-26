@@ -3,8 +3,10 @@ package gui
 import (
 	"testing"
 
+	"github.com/jesseduffield/lazygit/pkg/common"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/jesseduffield/lazygit/pkg/gui/context"
+	"github.com/jesseduffield/lazygit/pkg/gui/controllers/helpers"
 	"github.com/jesseduffield/lazygit/pkg/gui/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -15,6 +17,7 @@ func TestVimTopRequiresConsecutiveKeys(t *testing.T) {
 	}))
 	gui := &Gui{
 		g: &gocui.Gui{},
+		c: &helpers.HelperCommon{Common: common.NewDummyCommon()},
 		State: &GuiRepoState{
 			ContextMgr: &ContextMgr{ContextStack: []types.Context{files}},
 		},

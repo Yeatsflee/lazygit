@@ -54,6 +54,8 @@ func (gui *Gui) newPtyTask(view *gocui.View, cmd *exec.Cmd, prefix string) error
 		return gui.newCmdTask(view, cmd, prefix)
 	}
 
+	onInitialContent := gui.navigationContentReady(view)
+
 	// Run the pty after layout so that it gets the correct size
 	gui.afterLayout(func() error {
 		// Need to get the width and the pager again because the layout might have
@@ -97,7 +99,7 @@ func (gui *Gui) newPtyTask(view *gocui.View, cmd *exec.Cmd, prefix string) error
 		}
 
 		linesToRead := gui.linesToReadFromCmdTask(view)
-		return manager.NewTask(manager.NewCmdTask(start, prefix, linesToRead, onClose), cmdStr)
+		return manager.NewTask(manager.NewCmdTask(start, prefix, linesToRead, onClose), cmdStr, onInitialContent)
 	})
 
 	return nil

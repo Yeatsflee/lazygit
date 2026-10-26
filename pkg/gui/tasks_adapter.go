@@ -43,7 +43,7 @@ func (gui *Gui) newCmdTask(view *gocui.View, cmd *exec.Cmd, prefix string) error
 	}
 
 	linesToRead := gui.linesToReadFromCmdTask(view)
-	if err := manager.NewTask(manager.NewCmdTask(start, prefix, linesToRead, onClose), cmdStr); err != nil {
+	if err := manager.NewTask(manager.NewCmdTask(start, prefix, linesToRead, onClose), cmdStr, gui.navigationContentReady(view)); err != nil {
 		gui.c.Log.Error(err)
 	}
 
@@ -63,7 +63,7 @@ func (gui *Gui) newStringTaskWithoutScroll(view *gocui.View, str string) error {
 		return nil
 	}
 
-	if err := manager.NewTask(f, manager.GetTaskKey()); err != nil {
+	if err := manager.NewTask(f, manager.GetTaskKey(), gui.navigationContentReady(view)); err != nil {
 		return err
 	}
 
@@ -79,7 +79,7 @@ func (gui *Gui) newStringTaskWithScroll(view *gocui.View, str string, originX in
 		return nil
 	}
 
-	if err := manager.NewTask(f, manager.GetTaskKey()); err != nil {
+	if err := manager.NewTask(f, manager.GetTaskKey(), gui.navigationContentReady(view)); err != nil {
 		return err
 	}
 
@@ -95,7 +95,7 @@ func (gui *Gui) newStringTaskWithKey(view *gocui.View, str string, key string) e
 		return nil
 	}
 
-	if err := manager.NewTask(f, key); err != nil {
+	if err := manager.NewTask(f, key, gui.navigationContentReady(view)); err != nil {
 		return err
 	}
 

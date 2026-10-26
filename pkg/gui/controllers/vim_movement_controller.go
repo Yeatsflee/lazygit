@@ -8,12 +8,13 @@ import (
 
 type VimMovementController struct {
 	baseController
-	c       *ControllerCommon
-	context types.Context
+	c                 *ControllerCommon
+	context           types.Context
+	prepareGotoBottom func() func(func())
 }
 
-func NewVimMovementController(c *ControllerCommon, context types.Context) *VimMovementController {
-	return &VimMovementController{c: c, context: context}
+func NewVimMovementController(c *ControllerCommon, context types.Context, prepareGotoBottom func() func(func())) *VimMovementController {
+	return &VimMovementController{c: c, context: context, prepareGotoBottom: prepareGotoBottom}
 }
 
 func (self *VimMovementController) Context() types.Context {
@@ -121,11 +122,7 @@ func (self *VimMovementController) gotoBottom() error {
 		controller := &PatchExplorerController{c: self.c, context: ctx}
 		return controller.withRenderAndFocus(controller.HandleGotoBottom)()
 	default:
-		controller := &ViewSelectionController{c: self.c, context: ctx}
-		if self.c.GetViewBufferManagerForView(ctx.GetView()) == nil {
-			controller.handleLineChange(ctx.GetView().ViewLinesHeight())
-			return nil
-		}
+		controller := &ViewSelectionController{c: self.c, context: ctx, prepareGotoBottom: self.prepareGotoBottom}
 		return controller.handleGotoBottom()
 	}
 }

@@ -173,7 +173,7 @@ func (gui *Gui) resetHelpersAndControllers() {
 	contextLinesController := controllers.NewContextLinesController(common)
 	renameSimilarityThresholdController := controllers.NewRenameSimilarityThresholdController(common)
 	verticalScrollControllerFactory := controllers.NewVerticalScrollControllerFactory(common)
-	viewSelectionControllerFactory := controllers.NewViewSelectionControllerFactory(common)
+	viewSelectionControllerFactory := controllers.NewViewSelectionControllerFactory(common, gui.prepareVimGotoBottom)
 
 	branchesController := controllers.NewBranchesController(common)
 	gitFlowController := controllers.NewGitFlowController(common)
@@ -441,7 +441,7 @@ func (gui *Gui) resetHelpersAndControllers() {
 	} {
 		controllers.AttachControllers(context,
 			controllers.NewParentDirectoryController(common, context),
-			controllers.NewVimMovementController(common, context),
+			controllers.NewVimMovementController(common, context, gui.prepareVimGotoBottom),
 		)
 	}
 }

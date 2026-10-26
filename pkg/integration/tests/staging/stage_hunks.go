@@ -10,6 +10,7 @@ var StageHunks = NewIntegrationTest(NewIntegrationTestArgs{
 	ExtraCmdArgs: []string{},
 	Skip:         false,
 	SetupConfig: func(config *config.AppConfig) {
+		config.GetUserConfig().Keybinding.Universal.TogglePanel = []string{"<f12>"}
 		config.GetUserConfig().Gui.UseHunkModeInStagingView = false
 	},
 	SetupRepo: func(shell *Shell) {

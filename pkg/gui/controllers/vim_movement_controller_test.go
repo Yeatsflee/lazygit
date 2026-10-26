@@ -63,7 +63,7 @@ func TestVimHalfPageMovesSelectionAndViewportTogether(t *testing.T) {
 			view.SetCursorY(scenario.initialIndex*scenario.itemHeight - scenario.initialOrigin)
 			ctx := &vimListContext{view: view, list: list, itemHeight: scenario.itemHeight}
 
-			assert.NoError(t, NewVimMovementController(nil, ctx).halfPage(scenario.direction))
+			assert.NoError(t, NewVimMovementController(nil, ctx, nil).halfPage(scenario.direction))
 
 			assert.Equal(t, scenario.expectedIndex, list.GetSelectedLineIdx())
 			assert.Equal(t, scenario.expectedOrigin, view.OriginY())

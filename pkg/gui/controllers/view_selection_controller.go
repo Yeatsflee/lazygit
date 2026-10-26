@@ -6,20 +6,23 @@ import (
 )
 
 type ViewSelectionControllerFactory struct {
-	c *ControllerCommon
+	c                 *ControllerCommon
+	prepareGotoBottom func() func(func())
 }
 
-func NewViewSelectionControllerFactory(c *ControllerCommon) *ViewSelectionControllerFactory {
+func NewViewSelectionControllerFactory(c *ControllerCommon, prepareGotoBottom func() func(func())) *ViewSelectionControllerFactory {
 	return &ViewSelectionControllerFactory{
-		c: c,
+		c:                 c,
+		prepareGotoBottom: prepareGotoBottom,
 	}
 }
 
 func (self *ViewSelectionControllerFactory) Create(context types.Context) types.IController {
 	return &ViewSelectionController{
-		baseController: baseController{},
-		c:              self.c,
-		context:        context,
+		baseController:    baseController{},
+		c:                 self.c,
+		context:           context,
+		prepareGotoBottom: self.prepareGotoBottom,
 	}
 }
 
@@ -27,7 +30,8 @@ type ViewSelectionController struct {
 	baseController
 	c *ControllerCommon
 
-	context types.Context
+	context           types.Context
+	prepareGotoBottom func() func(func())
 }
 
 func (self *ViewSelectionController) Context() types.Context {
@@ -91,15 +95,24 @@ func (self *ViewSelectionController) handleGotoTop() error {
 }
 
 func (self *ViewSelectionController) handleGotoBottom() error {
+	var finish func(func())
+	if self.prepareGotoBottom != nil {
+		finish = self.prepareGotoBottom()
+	}
+	scroll := func() { self.context.GetView().ScrollDown(self.context.GetView().ViewLinesHeight()) }
 	if manager := self.c.GetViewBufferManagerForView(self.context.GetView()); manager != nil {
 		manager.ReadToEnd(func() {
 			self.c.OnUIThread(func() error {
-				v := self.Context().GetView()
-				self.handleLineChange(v.ViewLinesHeight())
+				if finish != nil {
+					finish(scroll)
+				} else {
+					scroll()
+				}
 				return nil
 			})
 		})
+	} else if finish != nil {
+		finish(scroll)
 	}
-
 	return nil
 }

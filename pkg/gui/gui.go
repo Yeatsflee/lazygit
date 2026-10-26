@@ -256,7 +256,12 @@ type GuiRepoState struct {
 
 	LastBackgroundFetchTime time.Time
 
-	vimPendingTop bool
+	vimPendingTop    bool
+	vimKeyGeneration uint64
+
+	pendingNavigationRestore *navigationRestoreRequest
+	vimHistory               *navigationHistory[vimJumpLocation]
+	pendingVimJump           *vimJumpLocation
 }
 
 var _ types.IRepoStateAccessor = new(GuiRepoState)
