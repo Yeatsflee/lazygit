@@ -1,8 +1,10 @@
 package context
 
 import (
+	"github.com/jesseduffield/lazygit/pkg/config"
 	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/jesseduffield/lazygit/pkg/gui/types"
+	"github.com/samber/lo"
 )
 
 type BaseContext struct {
@@ -119,6 +121,8 @@ func (self *BaseContext) GetKey() types.ContextKey {
 }
 
 func (self *BaseContext) GetKeybindings(opts types.KeybindingsOpts) []*types.Binding {
+	opts = self.withGoIntoAlias(opts)
+
 	bindings := []*types.Binding{}
 	for i := range self.keybindingsFns {
 		// the first binding in the bindings array takes precedence but we want the
@@ -127,6 +131,22 @@ func (self *BaseContext) GetKeybindings(opts types.KeybindingsOpts) []*types.Bin
 	}
 
 	return bindings
+}
+
+// Keep the alias local to the file and commit lists, including their keybinding
+// menus, without changing the user's bindings in other contexts.
+func (self *BaseContext) withGoIntoAlias(opts types.KeybindingsOpts) types.KeybindingsOpts {
+	switch self.key {
+	case FILES_CONTEXT_KEY, COMMIT_FILES_CONTEXT_KEY:
+		opts.Config.Universal.OpenFile = lo.Without(opts.Config.Universal.OpenFile, "o")
+	case LOCAL_COMMITS_CONTEXT_KEY:
+		opts.Config.Commits.OpenInBrowser = lo.Without(opts.Config.Commits.OpenInBrowser, "o")
+	default:
+		return opts
+	}
+
+	opts.Config.Universal.GoInto = lo.Union(opts.Config.Universal.GoInto, config.Keybinding{"o"})
+	return opts
 }
 
 func (self *BaseContext) AddKeybindingsFn(fn types.KeybindingsFn) {
