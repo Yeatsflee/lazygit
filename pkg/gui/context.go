@@ -170,6 +170,7 @@ func (self *ContextMgr) deactivate(c types.Context, opts types.OnFocusLostOpts) 
 }
 
 func (self *ContextMgr) Activate(c types.Context, opts types.OnFocusOpts) {
+	self.gui.State.vimPendingTop = false
 	viewName := c.GetViewName()
 	v, err := self.gui.c.GocuiGui().View(viewName)
 	if err != nil {

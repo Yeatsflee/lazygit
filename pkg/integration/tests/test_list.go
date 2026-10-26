@@ -475,6 +475,8 @@ var tests = []*components.IntegrationTest{
 	ui.RangeSelect,
 	ui.SwitchTabFromMenu,
 	ui.SwitchTabWithPanelJumpKeys,
+	ui.VimMainMovement,
+	ui.VimMovement,
 	undo.UndoCheckoutAndDrop,
 	undo.UndoCommit,
 	undo.UndoDrop,

@@ -178,6 +178,10 @@ type Gui struct {
 
 	OnSearchEscape func() error
 
+	// KeybindingMiddleware can inspect or consume keyboard and mouse button
+	// events before dispatch, including keys that do not have a binding.
+	KeybindingMiddleware func(Key, func() error) error
+
 	SearchEscapeKeys    []Key
 	NextSearchMatchKeys []Key
 	PrevSearchMatchKeys []Key
@@ -1300,6 +1304,13 @@ func (g *Gui) draw(v *View) error {
 // a key-press or mouse event satisfies a configured keybinding. Furthermore,
 // currentView's internal buffer is modified if currentView.Editable is true.
 func (g *Gui) onKey(ev *GocuiEvent) error {
+	if g.KeybindingMiddleware != nil && (ev.Type == eventKey || ev.Type == eventMouse) {
+		return g.KeybindingMiddleware(ev.Key, func() error { return g.handleKeyEvent(ev) })
+	}
+	return g.handleKeyEvent(ev)
+}
+
+func (g *Gui) handleKeyEvent(ev *GocuiEvent) error {
 	switch ev.Type {
 	case eventKey:
 

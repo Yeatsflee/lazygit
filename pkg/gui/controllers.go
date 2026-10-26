@@ -439,7 +439,10 @@ func (gui *Gui) resetHelpersAndControllers() {
 		gui.State.Contexts.StagingSecondary,
 		gui.State.Contexts.CustomPatchBuilder,
 	} {
-		controllers.AttachControllers(context, controllers.NewParentDirectoryController(common, context))
+		controllers.AttachControllers(context,
+			controllers.NewParentDirectoryController(common, context),
+			controllers.NewVimMovementController(common, context),
+		)
 	}
 }
 

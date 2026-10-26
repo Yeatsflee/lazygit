@@ -255,6 +255,8 @@ type GuiRepoState struct {
 	CurrentPopupOpts *types.CreatePopupPanelOpts
 
 	LastBackgroundFetchTime time.Time
+
+	vimPendingTop bool
 }
 
 var _ types.IRepoStateAccessor = new(GuiRepoState)
@@ -475,6 +477,7 @@ func (gui *Gui) onUserConfigLoaded() error {
 	gui.g.SearchEscapeKeys = config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.Return)
 	gui.g.NextSearchMatchKeys = config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.NextMatch)
 	gui.g.PrevSearchMatchKeys = config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.PrevMatch)
+	gui.g.KeybindingMiddleware = gui.handleVimNavigationKey
 
 	gui.g.SetEditKeybindings(
 		config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.MoveWordLeft),
