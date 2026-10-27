@@ -257,6 +257,7 @@ type GuiRepoState struct {
 	LastBackgroundFetchTime time.Time
 
 	vimPendingTop    bool
+	vimPendingFold   bool
 	vimKeyGeneration uint64
 
 	pendingNavigationRestore *navigationRestoreRequest

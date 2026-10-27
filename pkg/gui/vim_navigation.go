@@ -12,12 +12,32 @@ func (gui *Gui) handleVimNavigationKey(key gocui.Key, dispatch func() error) err
 	gui.State.vimKeyGeneration++
 
 	pendingTop := gui.State.vimPendingTop
+	pendingFold := gui.State.vimPendingFold
 	gui.State.vimPendingTop = false
+	gui.State.vimPendingFold = false
 	if gui.g.IsPasting || !context.SupportsVimNavigation(
 		gui.State.ContextMgr.Current(), gui.State.ContextMgr.CurrentSide(),
 	) {
 		gui.cancelVimRestore()
 		return dispatch()
+	}
+
+	if gui.supportsVimFolding() {
+		if pendingFold && gui.handleVimFoldKey(key) {
+			return nil
+		}
+		if key.Equals(gocui.NewKeyRune('z')) {
+			if pendingFold {
+				// zz preserves the original z binding (normally reflog undo).
+				gui.cancelVimRestore()
+				return dispatch()
+			}
+			gui.State.vimPendingFold = true
+			return nil
+		}
+		if pendingFold && key.Equals(gocui.NewKeyName(gocui.KeyEsc)) {
+			return nil
+		}
 	}
 
 	if key.Equals(gocui.NewKeyRune('g')) && !pendingTop {
