@@ -3,6 +3,7 @@ package controllers
 import (
 	"github.com/jesseduffield/lazygit/pkg/config"
 	"github.com/jesseduffield/lazygit/pkg/gui/context"
+	"github.com/jesseduffield/lazygit/pkg/gui/filetree"
 	"github.com/jesseduffield/lazygit/pkg/gui/types"
 )
 
@@ -78,18 +79,10 @@ type parentDirectoryTree interface {
 }
 
 func selectParentDirectory(tree parentDirectoryTree) bool {
-	if !tree.InTreeMode() || tree.Len() == 0 {
+	index, found := filetree.ParentDirectoryIndex(tree, tree.GetSelectedLineIdx())
+	if !found {
 		return false
 	}
-	selectedIndex := tree.GetSelectedLineIdx()
-	selectedDepth := tree.GetVisualDepth(selectedIndex)
-	// A rendered directory can combine several path components. Its parent is
-	// the nearest preceding row with a shallower visual depth.
-	for index := selectedIndex - 1; index >= 0; index-- {
-		if tree.GetVisualDepth(index) < selectedDepth {
-			tree.SetSelection(index)
-			return true
-		}
-	}
-	return false
+	tree.SetSelection(index)
+	return true
 }
